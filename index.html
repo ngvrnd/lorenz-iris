@@ -66,6 +66,8 @@ button {
 }
 button:active, button[aria-pressed=true] { border-color: var(--frame-lo) #dde5e8 #dde5e8 var(--frame-lo); background: var(--frame); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--title); outline-offset: 2px; }
+.share { align-items: center; }
+.copymsg { font-family: var(--font-mono); font-size: 12px; color: var(--panel-ink); min-width: 0; overflow-wrap: anywhere; user-select: all; }
 .notes { max-width: 980px; margin: 18px auto 0; color: #dce7ea; font-size: 14px; line-height: 1.65; display: grid; gap: 10px; }
 .notes p { margin: 0; max-width: 70ch; }
 .notes b { font-weight: 500; color: #fff; }
@@ -108,6 +110,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
       <button data-rho="24">ρ 24 · transient chaos</button>
       <button data-rho="99.96">ρ 99.96 · periodic</button>
     </div>
+    <div class="buttons share">
+      <button id="copy">Copy link</button>
+      <span id="copyMsg" class="copymsg" aria-live="polite"></span>
+    </div>
   </div>
 </div>
 
@@ -115,6 +121,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
   <p><b>Drag to rotate. Scroll, pinch, or use the Zoom buttons to zoom.</b> Double-click resets the view. Two trajectories, A in yellow and B in magenta, start a tiny gap apart. For a while they trace the same path, then the gap grows roughly tenfold every couple of time units until they end up on different wings. That's the sensitivity to initial conditions Edward Lorenz stumbled on in 1963, when he restarted a weather run from rounded-off numbers.</p>
   <p><b>Try ρ.</b> Below 1 everything falls to the origin. Up to about 24.74 the orbits spiral into one of two fixed points at the centers of the wings (around 24 they wander chaotically for a while first). Above that, the butterfly. At large values like 99.96 the chaos gives way to a periodic loop.</p>
   <p>Integrated with fourth-order Runge–Kutta at <code>dt = 0.005</code>. Companion to the <a href="https://ngvrnd.github.io/tek4006-cobweb/">Tek 4006 cobweb plot</a>.</p>
+  <p><b>Sharing a view.</b> The page's address keeps your current settings, zoom and viewing angle. Press Copy link and anyone who opens it sees the same thing.</p>
 </div>
 
 <script>
@@ -124,14 +131,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
   const $ = id => document.getElementById(id);
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  const hashQ = (() => { try { return new URLSearchParams(location.hash.slice(1)); } catch (e) { return new URLSearchParams(); } })();
+  const SLIDERS = ['sigma', 'rho', 'beta', 'gap', 'speed', 'trail'];
+  const hnum = (k, d) => hashQ.has(k) && isFinite(+hashQ.get(k)) ? +hashQ.get(k) : d;
+  SLIDERS.forEach(k => { if (hashQ.has(k) && isFinite(+hashQ.get(k))) $(k).value = hashQ.get(k); });
+
   let sigma = 10, rho = 28, beta = 8 / 3, gapExp = -5;
   let speedSteps = [0, 1, 2, 4, 6, 10, 16, 24, 40];
   let stepsPerFrame = speedSteps[3];
   let trailMax = 5000;
   const DT = 0.005;
-  let yaw = 0.6, pitch = -0.35, spin = !reduceMotion, paused = false, showB = true;
+  let yaw = hnum('yaw', 0.6), pitch = Math.max(-1.5, Math.min(1.5, hnum('pitch', -0.35)));
+  let spin = !reduceMotion && hashQ.get('spin') !== '0', paused = false, showB = true;
   let zoom = 1;
   const setZoom = z => { zoom = Math.max(0.3, Math.min(12, z)); };
+  setZoom(hnum('zoom', 1));
   let t = 0;
   let A, B;
 
@@ -292,6 +306,27 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
   bind('speed', v => stepsPerFrame = speedSteps[v], v => v === 0 ? 'stopped' : (speedSteps[v] / 4).toFixed(speedSteps[v] < 4 ? 2 : 0).replace(/\.?0+$/, '') + '×');
   bind('trail', v => trailMax = v, v => String(v));
   $('gap').addEventListener('input', e => { gapExp = +e.target.value; $('gapOut').textContent = '1e' + gapExp; restart(); });
+  gapExp = +$('gap').value; $('gapOut').textContent = '1e' + gapExp;
+
+  function writeHash() {
+    const q = new URLSearchParams();
+    SLIDERS.forEach(k => q.set(k, $(k).value));
+    const tau = 2 * Math.PI;
+    q.set('zoom', zoom.toFixed(2));
+    q.set('yaw', (((yaw % tau) + tau) % tau).toFixed(2));
+    q.set('pitch', pitch.toFixed(2));
+    if (!spin) q.set('spin', '0');
+    const h = '#' + q.toString();
+    if (h !== location.hash) { try { history.replaceState(null, '', h); } catch (e) {} }
+  }
+  setInterval(writeHash, 1000);
+  $('copy').onclick = () => {
+    writeHash();
+    const url = location.href, msg = $('copyMsg');
+    const copied = () => { msg.textContent = 'Link copied'; setTimeout(() => { msg.textContent = ''; }, 2500); };
+    const fallback = () => { msg.textContent = url; };
+    try { navigator.clipboard.writeText(url).then(copied, fallback); } catch (e) { fallback(); }
+  };
 
   const toggle = (id, get, set) => $(id).onclick = () => { set(!get()); $(id).setAttribute('aria-pressed', get()); };
   $('restart').onclick = restart;
