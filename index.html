@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A rotatable 3D Lorenz attractor in the style of an SGI IRIS workstation, with two trajectories that start a hair apart and drift onto different wings.">
+<meta property="og:title" content="Lorenz on the IRIS">
+<meta property="og:description" content="A rotatable 3D Lorenz attractor in the style of an SGI IRIS workstation, with two trajectories that start a hair apart and drift onto different wings.">
+<meta property="og:type" content="website">
+<title>Lorenz on the IRIS</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 4Dwm-style window — slate frame and title bar around a black GL viewport, a grey control panel below. Single dark theme by choice. */
+:root {
+  --desk: #3f5a63;
+  --frame: #8c9ca3;
+  --frame-hi: #b8c5ca;
+  --frame-lo: #56666c;
+  --title: #2e4a55;
+  --panel: #a9b3b7;
+  --panel-ink: #1d2427;
+  --panel-dim: #46545a;
+  --gl: #000000;
+  --traj-a: #ffd23f;
+  --traj-b: #ff4fd8;
+  --axis: #4fd0ff;
+  --font-ui: "IBM Plex Sans", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+html, body { background: var(--desk); }
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--panel-ink);
+  padding-block: 24px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.win { max-width: 980px; margin: 0 auto; background: var(--frame); border: 2px solid; border-color: var(--frame-hi) var(--frame-lo) var(--frame-lo) var(--frame-hi); padding: 5px; }
+.titlebar { display: flex; align-items: center; gap: 10px; background: var(--title); color: #e8f0f2; padding: 5px 8px; font-size: 13px; font-weight: 500; letter-spacing: 0.02em; }
+.titlebar .knob { width: 14px; height: 14px; border: 2px solid; border-color: var(--frame-hi) var(--frame-lo) var(--frame-lo) var(--frame-hi); background: var(--frame); flex: none; }
+.titlebar .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.titlebar .host { color: #a9c3cc; font-family: var(--font-mono); font-weight: 400; font-size: 12px; }
+.viewport { position: relative; width: 100%; max-width: 100%; aspect-ratio: 4 / 3; background: var(--gl); border: 2px solid; border-color: var(--frame-lo) var(--frame-hi) var(--frame-hi) var(--frame-lo); margin-top: 5px; touch-action: none; cursor: grab; }
+.viewport:active { cursor: grabbing; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hud { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: #cfd8dc; pointer-events: none; font-variant-numeric: tabular-nums; }
+.hud .a { color: var(--traj-a); }
+.hud .b { color: var(--traj-b); }
+.panel { background: var(--panel); margin-top: 5px; padding: 14px 16px 16px; border: 2px solid; border-color: var(--frame-hi) var(--frame-lo) var(--frame-lo) var(--frame-hi); display: grid; gap: 14px; }
+.sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 24px; }
+.ctl { display: grid; gap: 4px; min-width: 0; }
+.ctl label { display: flex; justify-content: space-between; font-size: 13px; color: var(--panel-dim); }
+.ctl label b { font-weight: 500; color: var(--panel-ink); }
+.ctl output { font-family: var(--font-mono); font-size: 13px; color: var(--panel-ink); font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--title); }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+button {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 500; color: var(--panel-ink);
+  background: var(--frame-hi); border: 2px solid; border-color: #dde5e8 var(--frame-lo) var(--frame-lo) #dde5e8;
+  padding: 6px 12px; cursor: pointer;
+}
+button:active, button[aria-pressed=true] { border-color: var(--frame-lo) #dde5e8 #dde5e8 var(--frame-lo); background: var(--frame); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--title); outline-offset: 2px; }
+.notes { max-width: 980px; margin: 18px auto 0; color: #dce7ea; font-size: 14px; line-height: 1.65; display: grid; gap: 10px; }
+.notes p { margin: 0; max-width: 70ch; }
+.notes b { font-weight: 500; color: #fff; }
+.notes code { font-family: var(--font-mono); font-size: 13px; }
+.notes a { color: #ffe27a; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar"><span class="knob" aria-hidden="true"></span><span class="name">lorenz — dx/dt = σ(y−x), dy/dt = x(ρ−z)−y, dz/dt = xy−βz</span><span class="host">iris:0</span></div>
+  <div class="viewport" id="vp">
+    <canvas id="gl" aria-label="Rotating three-dimensional Lorenz attractor with two trajectories"></canvas>
+    <div class="hud" aria-live="off">
+      <div>t <span id="hT">0.00</span></div>
+      <div class="a">A  <span id="hA">0, 0, 0</span></div>
+      <div class="b">B  <span id="hB">0, 0, 0</span></div>
+      <div>|A−B| <span id="hD">0</span></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="sliders">
+      <div class="ctl"><label for="sigma"><span><b>σ</b> sigma</span><output id="sigmaOut">10.00</output></label><input type="range" id="sigma" min="1" max="20" step="0.1" value="10"></div>
+      <div class="ctl"><label for="rho"><span><b>ρ</b> rho</span><output id="rhoOut">28.00</output></label><input type="range" id="rho" min="0.5" max="60" step="0.1" value="28"></div>
+      <div class="ctl"><label for="beta"><span><b>β</b> beta</span><output id="betaOut">2.667</output></label><input type="range" id="beta" min="0.5" max="6" step="0.01" value="2.6667"></div>
+      <div class="ctl"><label for="gap"><span>Starting gap</span><output id="gapOut">1e-5</output></label><input type="range" id="gap" min="-10" max="-1" step="1" value="-5"></div>
+      <div class="ctl"><label for="speed"><span>Speed</span><output id="speedOut">1×</output></label><input type="range" id="speed" min="0" max="8" step="1" value="3"></div>
+      <div class="ctl"><label for="trail"><span>Trail length</span><output id="trailOut">5000</output></label><input type="range" id="trail" min="500" max="20000" step="500" value="5000"></div>
+    </div>
+    <div class="buttons">
+      <button id="restart">Restart</button>
+      <button id="pause" aria-pressed="false">Pause</button>
+      <button id="spin" aria-pressed="true">Auto-spin</button>
+      <button id="showB" aria-pressed="true">Second trajectory</button>
+      <button id="classic">Classic values</button>
+      <button data-rho="14">ρ 14 · settles</button>
+      <button data-rho="24">ρ 24 · transient chaos</button>
+      <button data-rho="99.96">ρ 99.96 · periodic</button>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <p><b>Drag to rotate.</b> Two trajectories, A in yellow and B in magenta, start a tiny gap apart. For a while they trace the same path, then the gap grows roughly tenfold every couple of time units until they end up on different wings. That's the sensitivity to initial conditions Edward Lorenz stumbled on in 1963, when he restarted a weather run from rounded-off numbers.</p>
+  <p><b>Try ρ.</b> Below 1 everything falls to the origin. Up to about 24.74 the orbits spiral into one of two fixed points at the centers of the wings (around 24 they wander chaotically for a while first). Above that, the butterfly. At large values like 99.96 the chaos gives way to a periodic loop.</p>
+  <p>Integrated with fourth-order Runge–Kutta at <code>dt = 0.005</code>. Companion to the <a href="https://ngvrnd.github.io/tek4006-cobweb/">Tek 4006 cobweb plot</a>.</p>
+</div>
+
+<script>
+(() => {
+  const vp = document.getElementById('vp');
+  const cv = document.getElementById('gl'), g = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let sigma = 10, rho = 28, beta = 8 / 3, gapExp = -5;
+  let speedSteps = [0, 1, 2, 4, 6, 10, 16, 24, 40];
+  let stepsPerFrame = speedSteps[3];
+  let trailMax = 5000;
+  const DT = 0.005;
+  let yaw = 0.6, pitch = -0.35, spin = !reduceMotion, paused = false, showB = true;
+  let t = 0;
+  let A, B;
+
+  function makeTraj(p) { return { p: p.slice(), buf: new Float32Array(20000 * 3), head: 0, len: 0 }; }
+  function push(tr) {
+    const i = tr.head * 3;
+    tr.buf[i] = tr.p[0]; tr.buf[i + 1] = tr.p[1]; tr.buf[i + 2] = tr.p[2];
+    tr.head = (tr.head + 1) % 20000;
+    tr.len = Math.min(tr.len + 1, 20000);
+  }
+  function f(x, y, z) { return [sigma * (y - x), x * (rho - z) - y, x * y - beta * z]; }
+  function rk4(p) {
+    const [x, y, z] = p;
+    const k1 = f(x, y, z);
+    const k2 = f(x + k1[0] * DT / 2, y + k1[1] * DT / 2, z + k1[2] * DT / 2);
+    const k3 = f(x + k2[0] * DT / 2, y + k2[1] * DT / 2, z + k2[2] * DT / 2);
+    const k4 = f(x + k3[0] * DT, y + k3[1] * DT, z + k3[2] * DT);
+    for (let i = 0; i < 3; i++) p[i] += DT / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+  }
+
+  function restart() {
+    const start = [1, 1, 1];
+    A = makeTraj(start);
+    B = makeTraj([start[0] + Math.pow(10, gapExp), start[1], start[2]]);
+    t = 0;
+    push(A); push(B);
+  }
+
+  let W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = vp.clientWidth; H = vp.clientHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  }
+  new ResizeObserver(resize).observe(vp);
+  resize();
+
+  const BUCKETS = 8;
+  function project(x, y, z, cy, sy, cp, sp, s) {
+    const X = x, Y = y, Z = z - 25;
+    const x1 = X * cy - Y * sy, y1 = X * sy + Y * cy;
+    const y2 = y1 * cp - Z * sp, z2 = y1 * sp + Z * cp;
+    const persp = 1 / (1 + y2 / 160);
+    return [W / 2 + x1 * s * persp, H / 2 - z2 * s * persp, y2];
+  }
+
+  function drawTraj(tr, color, cy, sy, cp, sp, s) {
+    const n = Math.min(tr.len, trailMax);
+    if (n < 2) return;
+    const paths = Array.from({ length: BUCKETS }, () => new Path2D());
+    let idx = (tr.head - n + 20000) % 20000;
+    let prev = project(tr.buf[idx * 3], tr.buf[idx * 3 + 1], tr.buf[idx * 3 + 2], cy, sy, cp, sp, s);
+    for (let k = 1; k < n; k++) {
+      idx = (idx + 1) % 20000;
+      const cur = project(tr.buf[idx * 3], tr.buf[idx * 3 + 1], tr.buf[idx * 3 + 2], cy, sy, cp, sp, s);
+      const depth = (cur[2] + 30) / 60;
+      const age = k / n;
+      const b = Math.max(0, Math.min(BUCKETS - 1, Math.floor((1 - depth) * 0.6 * BUCKETS + age * 0.4 * BUCKETS)));
+      paths[b].moveTo(prev[0], prev[1]); paths[b].lineTo(cur[0], cur[1]);
+      prev = cur;
+    }
+    g.strokeStyle = color;
+    g.lineWidth = 1.3;
+    for (let b = 0; b < BUCKETS; b++) {
+      g.globalAlpha = 0.12 + 0.88 * (b + 1) / BUCKETS;
+      g.stroke(paths[b]);
+    }
+    g.globalAlpha = 1;
+    g.fillStyle = color;
+    g.beginPath(); g.arc(prev[0], prev[1], 3.2, 0, Math.PI * 2); g.fill();
+  }
+
+  function drawAxes(cy, sy, cp, sp, s) {
+    const o = project(0, 0, 25, cy, sy, cp, sp, s);
+    const ends = [[[20, 0, 25], 'x'], [[0, 20, 25], 'y'], [[0, 0, 45], 'z']];
+    g.strokeStyle = '#4fd0ff'; g.fillStyle = '#4fd0ff'; g.lineWidth = 1; g.globalAlpha = 0.55;
+    g.font = '12px "IBM Plex Mono", monospace';
+    for (const [p, label] of ends) {
+      const e = project(p[0], p[1], p[2], cy, sy, cp, sp, s);
+      g.beginPath(); g.moveTo(o[0], o[1]); g.lineTo(e[0], e[1]); g.stroke();
+      g.fillText(label, e[0] + 4, e[1] - 4);
+    }
+    g.globalAlpha = 1;
+  }
+
+  const fmt = v => (v >= 0 ? ' ' : '') + v.toFixed(2);
+  function hud() {
+    $('hT').textContent = t.toFixed(2);
+    $('hA').textContent = A.p.map(fmt).join(',');
+    $('hB').textContent = showB ? B.p.map(fmt).join(',') : '—';
+    const d = Math.hypot(A.p[0] - B.p[0], A.p[1] - B.p[1], A.p[2] - B.p[2]);
+    $('hD').textContent = showB ? (d < 0.01 ? d.toExponential(2) : d.toFixed(2)) : '—';
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (!paused) {
+      for (let i = 0; i < stepsPerFrame; i++) {
+        rk4(A.p); rk4(B.p); push(A); push(B); t += DT;
+        if (!isFinite(A.p[0]) || Math.abs(A.p[0]) > 1e6) { restart(); break; }
+      }
+    }
+    if (spin && !dragging) yaw += dt * 0.25;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const s = Math.min(W, H) / 62;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+    drawAxes(cy, sy, cp, sp, s);
+    if (showB) drawTraj(B, '#ff4fd8', cy, sy, cp, sp, s);
+    drawTraj(A, '#ffd23f', cy, sy, cp, sp, s);
+    hud();
+    requestAnimationFrame(frame);
+  }
+
+  let dragging = false, lx = 0, ly = 0;
+  vp.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; vp.setPointerCapture(e.pointerId); });
+  vp.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    yaw += (e.clientX - lx) * 0.008;
+    pitch = Math.max(-1.5, Math.min(1.5, pitch + (e.clientY - ly) * 0.008));
+    lx = e.clientX; ly = e.clientY;
+  });
+  const end = () => { dragging = false; };
+  vp.addEventListener('pointerup', end);
+  vp.addEventListener('pointercancel', end);
+
+  function bind(id, fn, show) {
+    const el = $(id);
+    const upd = () => { const v = +el.value; fn(v); $(id + 'Out').textContent = show(v); };
+    el.addEventListener('input', upd);
+    upd();
+  }
+  bind('sigma', v => sigma = v, v => v.toFixed(2));
+  bind('rho', v => rho = v, v => v.toFixed(2));
+  bind('beta', v => beta = v, v => v.toFixed(3));
+  bind('speed', v => stepsPerFrame = speedSteps[v], v => v === 0 ? 'stopped' : (speedSteps[v] / 4).toFixed(speedSteps[v] < 4 ? 2 : 0).replace(/\.?0+$/, '') + '×');
+  bind('trail', v => trailMax = v, v => String(v));
+  $('gap').addEventListener('input', e => { gapExp = +e.target.value; $('gapOut').textContent = '1e' + gapExp; restart(); });
+
+  const toggle = (id, get, set) => $(id).onclick = () => { set(!get()); $(id).setAttribute('aria-pressed', get()); };
+  $('restart').onclick = restart;
+  $('pause').onclick = () => { paused = !paused; $('pause').setAttribute('aria-pressed', paused); $('pause').textContent = paused ? 'Resume' : 'Pause'; };
+  toggle('spin', () => spin, v => spin = v);
+  $('spin').setAttribute('aria-pressed', spin);
+  toggle('showB', () => showB, v => showB = v);
+  const setSlider = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); };
+  $('classic').onclick = () => { setSlider('sigma', 10); setSlider('rho', 28); setSlider('beta', 2.6667); restart(); };
+  document.querySelectorAll('[data-rho]').forEach(b => b.onclick = () => { setSlider('rho', +b.dataset.rho); restart(); });
+
+  restart();
+  if (reduceMotion) { for (let i = 0; i < 4000; i++) { rk4(A.p); rk4(B.p); push(A); push(B); t += DT; } }
+  requestAnimationFrame(t0 => { last = t0; frame(t0); });
+})();
+</script>
+</body>
+</html>
