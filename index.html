@@ -83,6 +83,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
       <div class="a">A  <span id="hA">0, 0, 0</span></div>
       <div class="b">B  <span id="hB">0, 0, 0</span></div>
       <div>|A−B| <span id="hD">0</span></div>
+      <div>zoom <span id="hZ">1.0×</span></div>
     </div>
   </div>
   <div class="panel">
@@ -95,6 +96,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
       <div class="ctl"><label for="trail"><span>Trail length</span><output id="trailOut">5000</output></label><input type="range" id="trail" min="500" max="20000" step="500" value="5000"></div>
     </div>
     <div class="buttons">
+      <button id="zoomIn" aria-label="Zoom in">Zoom +</button>
+      <button id="zoomOut" aria-label="Zoom out">Zoom −</button>
+      <button id="resetView">Reset view</button>
       <button id="restart">Restart</button>
       <button id="pause" aria-pressed="false">Pause</button>
       <button id="spin" aria-pressed="true">Auto-spin</button>
@@ -108,7 +112,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
 </div>
 
 <div class="notes">
-  <p><b>Drag to rotate.</b> Two trajectories, A in yellow and B in magenta, start a tiny gap apart. For a while they trace the same path, then the gap grows roughly tenfold every couple of time units until they end up on different wings. That's the sensitivity to initial conditions Edward Lorenz stumbled on in 1963, when he restarted a weather run from rounded-off numbers.</p>
+  <p><b>Drag to rotate. Scroll, pinch, or use the Zoom buttons to zoom.</b> Double-click resets the view. Two trajectories, A in yellow and B in magenta, start a tiny gap apart. For a while they trace the same path, then the gap grows roughly tenfold every couple of time units until they end up on different wings. That's the sensitivity to initial conditions Edward Lorenz stumbled on in 1963, when he restarted a weather run from rounded-off numbers.</p>
   <p><b>Try ρ.</b> Below 1 everything falls to the origin. Up to about 24.74 the orbits spiral into one of two fixed points at the centers of the wings (around 24 they wander chaotically for a while first). Above that, the butterfly. At large values like 99.96 the chaos gives way to a periodic loop.</p>
   <p>Integrated with fourth-order Runge–Kutta at <code>dt = 0.005</code>. Companion to the <a href="https://ngvrnd.github.io/tek4006-cobweb/">Tek 4006 cobweb plot</a>.</p>
 </div>
@@ -126,6 +130,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
   let trailMax = 5000;
   const DT = 0.005;
   let yaw = 0.6, pitch = -0.35, spin = !reduceMotion, paused = false, showB = true;
+  let zoom = 1;
+  const setZoom = z => { zoom = Math.max(0.3, Math.min(12, z)); };
   let t = 0;
   let A, B;
 
@@ -218,6 +224,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
     $('hB').textContent = showB ? B.p.map(fmt).join(',') : '—';
     const d = Math.hypot(A.p[0] - B.p[0], A.p[1] - B.p[1], A.p[2] - B.p[2]);
     $('hD').textContent = showB ? (d < 0.01 ? d.toExponential(2) : d.toFixed(2)) : '—';
+    $('hZ').textContent = zoom.toFixed(1) + '×';
   }
 
   let last = performance.now();
@@ -231,7 +238,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
     }
     if (spin && !dragging) yaw += dt * 0.25;
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-    const s = Math.min(W, H) / 62;
+    const s = Math.min(W, H) / 62 * zoom;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
     drawAxes(cy, sy, cp, sp, s);
@@ -241,17 +248,37 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--title); out
     requestAnimationFrame(frame);
   }
 
-  let dragging = false, lx = 0, ly = 0;
-  vp.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; vp.setPointerCapture(e.pointerId); });
+  let dragging = false, lx = 0, ly = 0, pinch0 = 0, zoom0 = 1;
+  const pts = new Map();
+  const pinchDist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  vp.addEventListener('pointerdown', e => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    vp.setPointerCapture(e.pointerId);
+    if (pts.size === 1) { lx = e.clientX; ly = e.clientY; }
+    if (pts.size === 2) { pinch0 = pinchDist(); zoom0 = zoom; }
+    dragging = true;
+  });
   vp.addEventListener('pointermove', e => {
-    if (!dragging) return;
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size >= 2) { if (pinch0) setZoom(zoom0 * pinchDist() / pinch0); return; }
     yaw += (e.clientX - lx) * 0.008;
     pitch = Math.max(-1.5, Math.min(1.5, pitch + (e.clientY - ly) * 0.008));
     lx = e.clientX; ly = e.clientY;
   });
-  const end = () => { dragging = false; };
+  const end = e => {
+    pts.delete(e.pointerId);
+    if (pts.size === 1) { const p = [...pts.values()][0]; lx = p.x; ly = p.y; }
+    if (pts.size < 2) pinch0 = 0;
+    dragging = pts.size > 0;
+  };
   vp.addEventListener('pointerup', end);
   vp.addEventListener('pointercancel', end);
+  vp.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+  vp.addEventListener('dblclick', () => { setZoom(1); yaw = 0.6; pitch = -0.35; });
+  $('zoomIn').onclick = () => setZoom(zoom * 1.25);
+  $('zoomOut').onclick = () => setZoom(zoom / 1.25);
+  $('resetView').onclick = () => { setZoom(1); yaw = 0.6; pitch = -0.35; };
 
   function bind(id, fn, show) {
     const el = $(id);
